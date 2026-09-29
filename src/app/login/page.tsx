@@ -7,7 +7,6 @@ import { signIn, getSession } from "next-auth/react";
 import { ArrowRight, Loader2, Lock, Mail } from "lucide-react";
 
 import { AuthShell } from "@/components/AuthShell";
-import { DemoLogins } from "@/components/DemoLogins"; // TEMP: remove before launch
 
 export default function LoginPage() {
   const sp = useSearchParams();
@@ -108,8 +107,6 @@ export default function LoginPage() {
         Garage or trade buyer? <Link href="/trade-account">Apply for a trade account</Link>
       </p>
 
-      {/* TEMP: test accounts — remove before launch */}
-      <DemoLogins onPick={(e, p) => { setEmail(e); setPassword(p); setError(null); }} />
     </AuthShell>
   );
 }
