@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --max: 1320px;
+    --gutter: clamp(16px, 3vw, 22px);
+    --shadow-red: 0 14px 40px -12px rgba(7,31,54, 0.55);
+
+    /* shadcn semantic tokens — light + navy theme matching the MRK landing page. Values are space-separated HSL (no commas)
+       so Tailwind can wrap with hsl(...). */
+    --background: 0 0% 98%;           /* #fafafa */
+    --foreground: 214 100% 8%;        /* #001128 ink */
+    --card: 0 0% 100%;
+    --card-foreground: 214 100% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 214 100% 8%;
+    --primary: 209 77% 12%;           /* #071f36 navy */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 228 26% 96%;         /* #f3f4f8 */
+    --secondary-foreground: 214 100% 8%;
+    --muted: 225 25% 97%;             /* #f5f6f9 */
+    --muted-foreground: 220 9% 46%;   /* #6b7280 */
+    --accent: 240 7% 97%;             /* #f7f7f8 soft */
+    --accent-foreground: 214 100% 8%;
+    --destructive: 356 95% 46%;       /* red — errors / delete stay red */
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 7% 91%;             /* #e7e7ea line */
+    --input: 240 7% 91%;
+    --ring: 205 48% 48%;              /* #4084b4 */
+    --radius: 0.625rem;
+  }
+  * { border-color: hsl(var(--border)); }
+}
+
+html { scroll-behavior: smooth; }
+html, body {
+  background: #fafafa;
+  color: #001128;
+  font-family: var(--font-body), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body { line-height: 1.5; overflow-x: clip; }
+
+::selection { background: #dcedf8; color: #001128; }
+
+@layer components {
+  /* ---- Legacy helper classes, restyled to the light reference theme.
+         Pages progressively adopt the reference classes from theme.css;
+         these keep any not-yet-rewritten corner looking coherent. ---- */
+  .btn-trade {
+    @apply inline-flex items-center whitespace-nowrap rounded-[10px] bg-red px-5 py-2 text-[13px]
+           font-extrabold uppercase tracking-wider text-white transition
+           hover:bg-red-600;
+  }
+
+  .surface { @apply rounded-[14px] border border-line bg-white; }
+  .surface-deep { @apply rounded-[14px] border border-line bg-soft; }
+
+  .ifield {
+    @apply h-11 w-full rounded-lg border border-line bg-white px-3 text-sm text-ink
+           placeholder:text-muted-foreground outline-none transition
+           focus:border-red;
+    -webkit-appearance: none;
+  }
+  .ilabel { @apply mb-1.5 block text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground; }
+
+  .eyebrow {
+    @apply text-[11px] font-extrabold uppercase tracking-[0.2em] text-red;
+  }
+  .section-h2 {
+    @apply font-head uppercase leading-none tracking-[0.02em] text-ink;
+    font-size: clamp(30px, 4vw, 48px);
+  }
+  .section-h2 em { @apply not-italic text-red; }
+
+  .pill-brand {
+    @apply whitespace-nowrap rounded-full border border-line bg-white px-6 py-2 text-sm
+           font-bold uppercase tracking-wider text-ink/70 transition
+           hover:border-red hover:text-red;
+  }
+}
+
+/* ---- Indicator dot ---- */
+.pulse-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #071f36;
+  box-shadow: 0 0 6px #071f36;
+}
+
+/* ---- Portal text scale ------------------------------------------------ */
+/* Customer + admin portals (AccountShell, AdminShell) are dense data UIs
+   that historically leaned on text-[10px] / text-[11px] / text-xs for every
+   label. Bumping these globally inside .portal-scope keeps the storefront
+   marketing styling intact while making the dashboards more readable. The
+   specificity of ".portal-scope .text-xs" beats Tailwind's bare utility,
+   so no !important is needed. */
+.portal-scope { font-size: 17px; }
+
+.portal-scope .text-xs   { font-size: 14px;   line-height: 1.4rem;   }
+.portal-scope .text-sm   { font-size: 16px;   line-height: 1.6rem;   }
+.portal-scope .text-base { font-size: 18px;   line-height: 1.7rem;   }
+.portal-scope .text-lg   { font-size: 20px;   line-height: 1.8rem;   }
+.portal-scope .text-xl   { font-size: 24px;   line-height: 2rem;     }
+.portal-scope .text-2xl  { font-size: 28px;   line-height: 2.2rem;   }
+.portal-scope .text-3xl  { font-size: 34px;   line-height: 2.4rem;   }
+
+/* Tailwind arbitrary-px sizes used throughout the portals. Square brackets
+   must be CSS-escaped (`\[`, `\]`) to match the generated class name. */
+.portal-scope .text-\[9px\]    { font-size: 12px; }
+.portal-scope .text-\[10px\]   { font-size: 13px; }
+.portal-scope .text-\[10\.5px\]{ font-size: 13.5px; }
+.portal-scope .text-\[11px\]   { font-size: 14px; }
+.portal-scope .text-\[11\.5px\]{ font-size: 14px; }
+.portal-scope .text-\[12px\]   { font-size: 15px; }
+.portal-scope .text-\[12\.5px\]{ font-size: 15px; }
+.portal-scope .text-\[13px\]   { font-size: 15.5px; }
+.portal-scope .text-\[13\.5px\]{ font-size: 16px; }
+.portal-scope .text-\[14px\]   { font-size: 16.5px; }
+.portal-scope .text-\[15px\]   { font-size: 17px; }
+
+/* ---- Print: isolate the invoice modal --------------------------------- */
+/* When a dialog opts in via data-invoice-print, every other element on the
+   page goes invisible at print time so only the invoice is sent to paper /
+   PDF. visibility (vs. display) preserves layout calculations so the
+   invoice sits at the top-left of the page without weird offset bugs. */
+@media print {
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Use display:none (not visibility:hidden) so hidden elements no longer
+     consume layout space — that was forcing the printed invoice down by
+     several blank pages even when there was only one line item. Radix's
+     Dialog portal renders the overlay + content as direct children of body,
+     so this scopes correctly. */
+  body > * { display: none !important; }
+  body > [data-invoice-print] { display: block !important; }
+
+  /* The Radix-positioned dialog uses fixed + translate(-50%, -50%) to centre
+     itself; revert to static flow so the invoice fills the printed page from
+     the top. Also drop scroll-clipping that shadcn applies. */
+  [data-invoice-print] {
+    position: static !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+  [data-invoice-print] * {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Set print page margins (browser default leaves room for headers/footers
+     and lots of side padding — A4 with 0.5in margins fits nicely). */
+  @page { margin: 12mm; }
+}

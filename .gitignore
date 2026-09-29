@@ -1,0 +1,24 @@
+node_modules/
+.next/
+out/
+.claude/
+tsconfig.tsbuildinfo
+.env
+.env.local
+.env*.local
+*.log
+.DS_Store
+.vscode/
+.idea/
+prisma/migrations/dev.db*
+public/uploads/*
+!public/uploads/.gitkeep
+wimbledon-motorbikes*.html
+.vercel
+engine-aid-hub-main/
+
+# Headless-Chrome profile left over from CDP testing — never commit
+chrome-nav/
+
+# Database dumps contain customer data — never commit
+backups/

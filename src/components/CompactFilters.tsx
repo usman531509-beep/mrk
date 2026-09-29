@@ -1,0 +1,452 @@
+"use client";
+
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { Check, ChevronDown, Loader2, Search } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+
+type Brand = { id: string; name: string; slug: string };
+type ProductBrand = { id: string; name: string; slug: string };
+// Tree-shaped — we render the dropdown with depth-based indentation and use
+// the full `path` as the value so picking a parent category like "brake"
+// rolls up products from every descendant. `count` is the rolled-up active-
+// product total, used to hide empty branches.
+type Category = {
+  id: string;
+  name: string;
+  slug: string;
+  path: string;
+  depth: number;
+  parentId: string | null;
+  count: number;
+};
+type BikeModel = {
+  id: string;
+  name: string;
+  brandId: string;
+  yearStart: number;
+  yearEnd: number;
+  brand: { name: string; slug: string };
+};
+
+// Active-filter pill bar (reference .active-filters) shown above the product
+// grid. Hosts a search field (.af-search) plus Category + Brand + Model +
+// Year pills (.af-pill) with a popover picker and a remove ✕. Pure
+// URL-driven: every pill pushes a search-param patch and refreshes the
+// server-rendered grid.
+
+export function CompactFilters({
+  brands,
+  productBrands = [],
+  models,
+  categories = [],
+}: {
+  brands: Brand[];
+  productBrands?: ProductBrand[];
+  models: BikeModel[];
+  categories?: Category[];
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [pending, startTransition] = useTransition();
+
+  // On /category/<path>, the active category lives in the URL pathname, not
+  // in `?category=`. Surface it to the chip so the label reads correctly and
+  // the dropdown opens with the current node highlighted.
+  const pathBasedCategoryPath = useMemo(() => {
+    if (!pathname?.startsWith("/category/")) return "";
+    return decodeURIComponent(pathname.slice("/category/".length));
+  }, [pathname]);
+  const queryCategory = searchParams.get("category") ?? "";
+  const activeCategoryValue = pathBasedCategoryPath || queryCategory;
+
+  const brandSlug        = searchParams.get("brand")        ?? "";
+  const productBrandSlug = searchParams.get("productBrand") ?? "";
+  const modelId          = searchParams.get("model")        ?? "";
+  const year             = searchParams.get("year")         ?? "";
+  const q                = searchParams.get("q")            ?? "";
+
+  // Local input state for the search box, kept in sync with the URL.
+  // Debounced push so we don't fire a request on every keystroke.
+  const [qInput, setQInput] = useState(q);
+  useEffect(() => { setQInput(q); }, [q]);
+  useEffect(() => {
+    if (qInput === q) return;
+    const t = setTimeout(() => pushUrl({ q: qInput || null }), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qInput]);
+
+  const selectedCategory = useMemo(
+    () =>
+      categories.find((c) => c.path === activeCategoryValue) ??
+      categories.find((c) => c.slug === activeCategoryValue),
+    [activeCategoryValue, categories],
+  );
+
+  // Pre-sort the tree depth-first so every child appears under its parent
+  // in the dropdown. Indentation is driven by `depth`.
+  const orderedCategories = useMemo(() => {
+    const byParent = new Map<string | null, Category[]>();
+    for (const c of categories) {
+      const arr = byParent.get(c.parentId) ?? [];
+      arr.push(c);
+      byParent.set(c.parentId, arr);
+    }
+    for (const arr of byParent.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+    const out: Category[] = [];
+    const walk = (parentId: string | null) => {
+      for (const node of byParent.get(parentId) ?? []) {
+        out.push(node);
+        walk(node.id);
+      }
+    };
+    walk(null);
+    return out;
+  }, [categories]);
+
+  const filteredModels = useMemo(
+    () => (brandSlug ? models.filter((m) => m.brand.slug === brandSlug) : models),
+    [brandSlug, models],
+  );
+  const selectedBrand = useMemo(
+    () => brands.find((b) => b.slug === brandSlug),
+    [brandSlug, brands],
+  );
+  const selectedProductBrand = useMemo(
+    () => productBrands.find((b) => b.slug === productBrandSlug),
+    [productBrandSlug, productBrands],
+  );
+  const selectedModel = useMemo(
+    () => models.find((m) => m.id === modelId),
+    [modelId, models],
+  );
+  const yearRangeValue = selectedModel
+    ? `${selectedModel.yearStart}-${selectedModel.yearEnd}`
+    : "";
+  const yearRangeLabel = selectedModel
+    ? `${selectedModel.yearStart}–${selectedModel.yearEnd}`
+    : "";
+
+  // Generic search-param patch — used by brand/model/year/q. Stays on the
+  // current pathname.
+  const pushUrl = (patch: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === "") params.delete(k);
+      else params.set(k, v);
+    }
+    const qs = params.toString();
+    startTransition(() => {
+      router.push(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+      router.refresh();
+    });
+  };
+
+  // Category change stays on /products and just updates the query string.
+  // No full route change → no page reload → snappier drilldown. The server
+  // handles descendant rollup based on `?category=<path>`.
+  const setCategory = (path: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (path) params.set("category", path);
+    else params.delete("category");
+    const qs = params.toString();
+    startTransition(() => {
+      router.push(`/products${qs ? `?${qs}` : ""}`, { scroll: false });
+      router.refresh();
+    });
+  };
+
+  const clearAll = () => {
+    // Wipe every filter param AND drop back to /products (the canonical
+    // "no category selected" surface) so the user has a clean slate.
+    startTransition(() => {
+      router.push("/products", { scroll: false });
+      router.refresh();
+    });
+  };
+
+  const anyActive = !!(activeCategoryValue || brandSlug || productBrandSlug || modelId || year || q);
+  const noBrands = brands.length === 0;
+  const noProductBrands = productBrands.length === 0;
+
+  return (
+    <div className="active-filters">
+      {/* Search within current filters */}
+      <div className="af-search">
+        <Search className="af-search-ico h-4 w-4 shrink-0" aria-hidden="true" />
+        <input
+          type="search"
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
+          placeholder={
+            selectedBrand || selectedModel
+              ? `Search in ${selectedModel?.name ?? selectedBrand?.name} parts…`
+              : "Search parts by name, OEM, SKU…"
+          }
+        />
+        {qInput && (
+          <button
+            type="button"
+            onClick={() => setQInput("")}
+            aria-label="Clear search"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-soft text-sm leading-none text-ink transition hover:bg-red hover:text-white"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {/* Category — full tree, indented by depth. Value is the path so the
+          server can roll up products from every descendant. */}
+      <FilterChip
+        label="Category"
+        value={selectedCategory?.name}
+        clearable={!!activeCategoryValue}
+        onClear={() => setCategory("")}
+        disabled={orderedCategories.length === 0}
+      >
+        <List
+          searchable
+          items={[
+            { value: "", label: "All categories", depth: 0 },
+            ...orderedCategories.map((c) => ({
+              value: c.path,
+              label: c.name,
+              depth: c.depth,
+            })),
+          ]}
+          selected={selectedCategory?.path ?? ""}
+          onSelect={(v) => setCategory(v)}
+          empty="No categories yet"
+        />
+      </FilterChip>
+
+      {/* Bike brand — the motorcycle make the part fits (Honda, Yamaha…). */}
+      <FilterChip
+        label="Bike brand"
+        value={selectedBrand?.name}
+        clearable={!!brandSlug}
+        onClear={() => pushUrl({ brand: null, model: null, year: null })}
+        disabled={noBrands}
+      >
+        <List
+          searchable
+          items={[
+            { value: "", label: "All bike brands" },
+            ...brands.map((b) => ({ value: b.slug, label: b.name })),
+          ]}
+          selected={brandSlug}
+          onSelect={(v) => pushUrl({ brand: v || null, model: null, year: null })}
+          empty="No brands yet"
+        />
+      </FilterChip>
+
+      {/* Product brand — manufacturer of the part itself (Brembo, NGK, EBC…). */}
+      <FilterChip
+        label="Product brand"
+        value={selectedProductBrand?.name}
+        clearable={!!productBrandSlug}
+        onClear={() => pushUrl({ productBrand: null })}
+        disabled={noProductBrands}
+      >
+        <List
+          searchable
+          items={[
+            { value: "", label: "All product brands" },
+            ...productBrands.map((b) => ({ value: b.slug, label: b.name })),
+          ]}
+          selected={productBrandSlug}
+          onSelect={(v) => pushUrl({ productBrand: v || null })}
+          empty="No product brands yet"
+        />
+      </FilterChip>
+
+      {/* Model */}
+      <FilterChip
+        label="Model"
+        value={selectedModel?.name}
+        clearable={!!modelId}
+        onClear={() => pushUrl({ model: null, year: null })}
+        disabled={filteredModels.length === 0}
+        hint={!brandSlug ? "Pick a brand first" : undefined}
+      >
+        <List
+          searchable
+          items={[
+            { value: "", label: "Any model" },
+            ...filteredModels.map((m) => ({
+              value: m.id,
+              label: `${brandSlug ? m.name : `${m.brand.name} ${m.name}`} (${m.yearStart}–${m.yearEnd})`,
+            })),
+          ]}
+          selected={modelId}
+          onSelect={(v) => pushUrl({ model: v || null, year: null })}
+          empty="No models for this brand"
+        />
+      </FilterChip>
+
+      {/* Year */}
+      <FilterChip
+        label="Year"
+        value={year ? (year.includes("-") ? year.replace("-", "–") : year) : undefined}
+        clearable={!!year}
+        onClear={() => pushUrl({ year: null })}
+        disabled={!selectedModel}
+        hint={!selectedModel ? "Pick a model first" : undefined}
+      >
+        <List
+          items={[
+            { value: "", label: "Any year" },
+            ...(yearRangeValue
+              ? [{ value: yearRangeValue, label: yearRangeLabel }]
+              : []),
+          ]}
+          selected={year}
+          onSelect={(v) => pushUrl({ year: v || null })}
+          empty="No years available"
+        />
+      </FilterChip>
+
+      {pending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+
+      {anyActive && (
+        <button type="button" onClick={clearAll} className="af-clear">
+          × Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+// --- Filter pill (.af-pill): label + value + caret with a popover list ------
+
+function FilterChip({
+  label, value, clearable, onClear, children, disabled, hint,
+}: {
+  label: string;
+  value?: string;
+  clearable: boolean;
+  onClear: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+  hint?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className={cn("af-pill", disabled && "cursor-not-allowed opacity-50")}>
+      <Popover open={open} onOpenChange={(v) => !disabled && setOpen(v)}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            className="flex cursor-pointer items-center gap-2 bg-transparent disabled:cursor-not-allowed"
+            aria-label={hint ?? `${label} filter`}
+            title={hint}
+          >
+            <span className="af-label">{label}</span>
+            {value ? (
+              <span className="af-value">{value}</span>
+            ) : (
+              <span className="text-[13px] font-medium text-muted-foreground">
+                {hint ? "—" : "Any"}
+              </span>
+            )}
+            <ChevronDown className="af-caret h-3.5 w-3.5" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="min-w-[260px] p-1"
+          onClick={() => setOpen(false)}
+        >
+          {children}
+        </PopoverContent>
+      </Popover>
+      {clearable && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="af-x"
+          aria-label={`Clear ${label.toLowerCase()}`}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+function List({
+  items, selected, onSelect, empty, searchable,
+}: {
+  items: { value: string; label: string; depth?: number }[];
+  selected: string;
+  onSelect: (v: string) => void;
+  empty: string;
+  searchable?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  if (items.length <= 1) {
+    return <div className="px-3 py-2 text-sm text-muted-foreground">{empty}</div>;
+  }
+  const filtered = query
+    ? [
+        items[0],
+        ...items.slice(1).filter((it) =>
+          it.label.toLowerCase().includes(query.toLowerCase()),
+        ),
+      ]
+    : items;
+  return (
+    <div className="flex flex-col">
+      {searchable && (
+        <div
+          className="relative px-1.5 pt-1.5 pb-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search…"
+            className="w-full rounded border border-border bg-background py-2 pl-7 pr-2 text-sm outline-none focus:border-primary/50"
+          />
+        </div>
+      )}
+      <ul className="max-h-[300px] overflow-y-auto">
+        {filtered.length === 1 && query ? (
+          <li className="px-3 py-2 text-sm text-muted-foreground">No matches</li>
+        ) : (
+          filtered.map((it) => {
+            const isActive = it.value === selected;
+            const depth = it.depth ?? 0;
+            return (
+              <li key={it.value || "any"}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(it.value)}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded py-2 pr-2.5 text-left text-sm transition",
+                    isActive ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  style={{ paddingLeft: 12 + depth * 14 }}
+                >
+                  <span className="truncate">{it.label}</span>
+                  {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                </button>
+              </li>
+            );
+          })
+        )}
+      </ul>
+    </div>
+  );
+}

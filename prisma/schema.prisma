@@ -1,0 +1,715 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled connection (PgBouncer) for runtime queries.
+  url       = env("DATABASE_URL")
+  // Direct connection used by `prisma migrate` and introspection.
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  STAFF
+  MANAGER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum TradeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PLACED
+  RECEIVED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  REFUNDED
+}
+
+// How a StockLayer entered inventory. PURCHASE_ORDER → linked to a PO line.
+// MANUAL_ADJUSTMENT → admin bumped stock directly (uses product's current
+// costPrice). INITIAL → synthetic backfill layer for stock that existed
+// before FIFO tracking was introduced.
+enum StockLayerSource {
+  PURCHASE_ORDER
+  MANUAL_ADJUSTMENT
+  INITIAL
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  role          Role      @default(USER)
+  phone         String?
+  // Default shipping address — full UK postal shape so checkout can pre-
+  // fill all fields without extra prompts. `address` is line 1 (kept under
+  // the historical name so older code paths keep compiling); the other
+  // four columns were added when we standardised on UK address capture.
+  address       String?
+  addressLine2  String?
+  city          String?
+  county        String?
+  postcode      String?
+  country       String?
+  orders        Order[]   @relation("UserOrders")
+  ordersCreatedAsAdmin Order[] @relation("AdminCreatedOrders")
+  expensesCreated      Expense[] @relation("AdminCreatedExpenses")
+  activityLogs         ActivityLog[]
+  purchaseOrdersCreated PurchaseOrder[] @relation("AdminCreatedPOs")
+  cart          Cart?
+  wishlist      Wishlist?
+  tradeApproved Boolean   @default(false)
+  tradeApprovedAt DateTime?
+  mustChangePassword Boolean @default(false)
+  active        Boolean   @default(true)
+  // Module keys this user can access in the admin panel. ADMIN role has
+  // implicit full access regardless of this list.
+  permissions   String[]  @default([])
+  tradeRequests TradeAccountRequest[] @relation("UserTradeRequests")
+  tradeDecisions TradeAccountRequest[] @relation("AdminTradeDecisions")
+  payments       Payment[]
+  addresses     Address[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+// Customer-managed address book. Saved templates that get copied into an
+// Order at checkout — editing later does not rewrite historical orders.
+model Address {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label         String?  @db.VarChar(60)
+  recipientName String   @db.VarChar(120)
+  phone         String?  @db.VarChar(60)
+  line1         String   @db.VarChar(200)
+  line2         String?  @db.VarChar(200)
+  city          String   @db.VarChar(120)
+  county        String?  @db.VarChar(120)
+  postcode      String   @db.VarChar(20)
+  country       String   @db.VarChar(120)
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, isDefault])
+}
+
+model Brand {
+  id        String      @id @default(cuid())
+  name      String      @unique
+  slug      String      @unique
+  logoUrl   String?
+  // A `Brand` now plays two roles. Originally it was both the bike-make
+  // (Honda, Yamaha) AND the part manufacturer (Honda OEM); the admin UI
+  // calls this "Bike Brands". Standalone part manufacturers (Brembo, NGK,
+  // EBC) live in the separate `ProductBrand` model below.
+  products  Product[]
+  // M2M back-relation. A product can declare it's compatible with multiple
+  // bike brands (a universal grip fits Honda + Yamaha + Kawasaki). Each
+  // product still carries a primary `brandId` for legacy displays — this
+  // relation is always a superset of {brandId}.
+  compatProducts Product[] @relation("PartCompatBrands")
+  bikeModels BikeModel[]
+  createdAt DateTime    @default(now())
+}
+
+// Manufacturer of a product (Brembo, NGK, EBC, K&N). Independent of the
+// bike-make brand a part fits on. Optional on `Product.productBrandId` so
+// existing rows keep working until they're tagged.
+model ProductBrand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  logoUrl   String?
+  products  Product[]
+  createdAt DateTime  @default(now())
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String
+  // Parent in the category tree. Null at the top level. A leaf is any
+  // category with no children — products can only attach to leaves.
+  parentId    String?
+  parent      Category? @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  // Denormalised so we can resolve `/category/brake/motorcycle-brake-pads`
+  // and run descendant rollups without recursive CTEs. Kept in sync inside
+  // a transaction whenever name/slug/parent changes.
+  path        String    @unique
+  depth       Int       @default(0)
+  sortOrder   Int       @default(0)
+  description String?
+  imageUrl    String?
+  products    Product[]   @relation("ProductCategory")
+  // Products whose live category was soft-deleted and that are temporarily
+  // homeless. `Product.savedCategoryId` points here so we can rehome them if
+  // the admin restores the category. Cleared the moment an admin manually
+  // reassigns the product to any category.
+  pendingProducts Product[] @relation("ProductSavedCategory")
+  tradeDiscount TradeDiscount?
+  createdAt   DateTime  @default(now())
+  // Soft-delete tombstone. Categories with order/PO history can't be hard-
+  // deleted (FK restrict on Product → Category → OrderItem). When admin
+  // "deletes" a category we just stamp this column and filter it out of every
+  // storefront + admin list. The slug/path uniqueness still applies, so a
+  // soft-deleted category's name can't be reused until it's restored.
+  deletedAt   DateTime?
+
+  // Slug uniqueness is scoped to a parent — "bearings" can exist under both
+  // "engine" and "wheels". The global `path` uniqueness above prevents
+  // duplicate full URLs.
+  @@unique([parentId, slug])
+  @@index([parentId])
+  @@index([path])
+  @@index([deletedAt])
+}
+
+model BikeModel {
+  id            String                 @id @default(cuid())
+  name          String
+  slug          String                 @unique
+  brandId       String
+  brand         Brand                  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  yearStart     Int
+  yearEnd       Int
+  imageUrl      String?
+  compatibilities ProductCompatibility[]
+  createdAt     DateTime               @default(now())
+
+  // Same brand+model can repeat with different year ranges (e.g. "Nmax 125
+  // (2015-2020)" and "Nmax 125 (2021-2025)" as two separate rows), so the
+  // year range is part of the uniqueness key.
+  @@unique([brandId, name, yearStart, yearEnd])
+  @@index([brandId])
+}
+
+model Product {
+  id              String                 @id @default(cuid())
+  name            String
+  slug            String                 @unique
+  description     String
+  price           Decimal                @db.Decimal(10, 2)
+  costPrice       Decimal?               @db.Decimal(10, 2)
+  stock           Int                    @default(0)
+  lowStockThreshold Int                  @default(5)
+  images          String[]
+  sku             String?                @unique
+  oemNumber       String?                @db.VarChar(64)
+  featured        Boolean                @default(false)
+  // Admin-curated "in demand" flag. Surfaces a dedicated home-page banner
+  // with the products the shop wants to promote right now (separate from
+  // `featured`, which drives the catalogue-wide Featured strip).
+  demanding       Boolean                @default(false)
+  active          Boolean                @default(true)
+  // Primary bike brand. When the admin ticks multiple brands in the part
+  // dialog, the FIRST selection becomes the primary — every legacy display
+  // (storefront cards, search, admin lists) reads this. The full list lives
+  // in the M2M `brands` relation below.
+  brandId         String
+  brand           Brand                  @relation(fields: [brandId], references: [id])
+  // Multi-brand compatibility. Implicit Prisma M2M backed by the
+  // `_PartCompatBrands` join table. Always a superset of {brandId} — saved
+  // together by the part dialog.
+  brands          Brand[]                @relation("PartCompatBrands")
+  // Manufacturer of the part itself (Brembo, NGK, EBC). Optional so admins
+  // can tag in their own time; existing rows stay untouched until edited.
+  productBrandId  String?
+  productBrand    ProductBrand?          @relation(fields: [productBrandId], references: [id], onDelete: SetNull)
+  // Nullable so a product can survive its category being soft-deleted —
+  // when that happens we copy the value into `savedCategoryId` below and
+  // null this out. The admin can either restore the category (rehome via
+  // savedCategoryId) or pick a new category (clears savedCategoryId).
+  categoryId      String?
+  category        Category?              @relation("ProductCategory", fields: [categoryId], references: [id])
+  // Snapshot of the previous categoryId at the moment its category was
+  // soft-deleted. Set by the category DELETE handler, consumed by the
+  // category RESTORE handler, cleared by any manual category change.
+  savedCategoryId String?
+  savedCategory   Category?              @relation("ProductSavedCategory", fields: [savedCategoryId], references: [id], onDelete: SetNull)
+  compatibilities ProductCompatibility[]
+  orderItems      OrderItem[]
+  cartItems       CartItem[]
+  wishlistItems   WishlistItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  stockLayers     StockLayer[]
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  // Soft-delete tombstone. Products with order history can't be hard-deleted
+  // because OrderItem.product is a Restrict relation, so "delete" in the
+  // admin sets this column. Soft-deleted rows are hidden from the storefront,
+  // cart, search, wishlist, and admin lists; only the "Deleted" admin tab
+  // shows them, with a Restore action.
+  deletedAt       DateTime?
+
+  @@index([brandId])
+  @@index([productBrandId])
+  @@index([categoryId])
+  @@index([savedCategoryId])
+  @@index([featured])
+  @@index([demanding])
+  @@index([active])
+  @@index([deletedAt])
+}
+
+model ProductCompatibility {
+  id          String    @id @default(cuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  bikeModelId String
+  bikeModel   BikeModel @relation(fields: [bikeModelId], references: [id], onDelete: Cascade)
+  yearFrom    Int
+  yearTo      Int
+  notes       String?
+
+  @@unique([productId, bikeModelId, yearFrom, yearTo])
+  @@index([bikeModelId, yearFrom, yearTo])
+  @@index([productId])
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  // Human-readable order number in the form "MRK4000001". Set on creation
+  // via a transactional sequence so admins / customers see a sane reference
+  // instead of the cuid. Stays unique once assigned.
+  orderNumber     String?     @unique
+  // Opaque token used in the public payment URL `/pay/<token>` for orders
+  // created by an admin on a customer's behalf. NULL for storefront orders
+  // (which are paid inline). Once the order is PAID we keep the token so
+  // the page can show a "Payment completed" state instead of 404ing.
+  paymentToken    String?     @unique
+  userId          String?
+  user            User?       @relation("UserOrders", fields: [userId], references: [id])
+  createdByAdminId String?
+  createdByAdmin  User?       @relation("AdminCreatedOrders", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  status      OrderStatus @default(PENDING)
+  total       Decimal     @db.Decimal(10, 2)
+  // Breakdown of the totals (persisted so invoices/order views don't have
+  // to re-derive them, which breaks once admin enters a manual discount).
+  // Defaults of 0 keep legacy rows working — the display falls back to
+  // deriving shipping from total - subtotal - tax when these are zero.
+  shippingFee Decimal     @db.Decimal(10, 2) @default(0)
+  discount    Decimal     @db.Decimal(10, 2) @default(0)
+  customerName  String
+  customerEmail String
+  customerPhone String
+  // UK-style postal address. shippingAddress is line 1 (kept under the
+  // existing name so legacy rows + invoices continue to work). Postcode
+  // defaults to "" so we don't have to backfill historical orders.
+  shippingAddress      String
+  shippingAddressLine2 String?
+  shippingCity         String
+  shippingCounty       String?
+  shippingPostcode     String  @default("")
+  shippingCountry      String
+  notes       String?
+  // Shipment / tracking info. Captured when admin transitions the order
+  // into SHIPPED. Customer-visible on the account orders page.
+  courierId       String?
+  courier         Courier?    @relation(fields: [courierId], references: [id], onDelete: SetNull)
+  trackingNumber  String?
+  shippedAt       DateTime?
+  // True once stock has been deducted for this order's items. Stock is
+  // deducted on transition to DELIVERED and restored on transition away
+  // from DELIVERED. Lets us avoid double-deduction if status flips back.
+  stockDeducted Boolean   @default(false)
+  // Payments attached to this order. There can be more than one if a card
+  // was retried, or for partial refunds. The latest SUCCEEDED row is the
+  // authoritative "this order is paid" record.
+  payments     Payment[]
+  paidAt       DateTime?
+  items       OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([courierId])
+  @@index([paidAt])
+}
+
+model TradeDiscount {
+  id         String   @id @default(cuid())
+  categoryId String   @unique
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  percent    Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// Store-wide trade settings (singleton, id = "global"). `globalPercent` is the
+// baseline trade discount applied to EVERY product; a per-category
+// TradeDiscount overrides it for that category.
+model TradeSetting {
+  id            String   @id @default("global")
+  globalPercent Int      @default(0)
+  updatedAt     DateTime @updatedAt
+}
+
+model Wishlist {
+  id        String         @id @default(cuid())
+  userId    String         @unique
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WishlistItem[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+// WishlistItem keeps a snapshot of the product at add-time so the entry
+// survives even if the underlying product is later removed from the
+// catalogue. The product FK uses SetNull for the same reason.
+model WishlistItem {
+  id           String   @id @default(cuid())
+  wishlistId   String
+  wishlist     Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName  String
+  productSlug  String
+  productPrice Decimal  @db.Decimal(10, 2)
+  productImage String?
+  productBrand String?
+  createdAt    DateTime @default(now())
+
+  @@unique([wishlistId, productId])
+  @@index([productId])
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId])
+  @@index([productId])
+}
+
+model TradeAccountRequest {
+  id              String             @id @default(cuid())
+  userId          String?
+  user            User?              @relation("UserTradeRequests", fields: [userId], references: [id], onDelete: SetNull)
+  // Applicant contact info (captured at submit time; safe to keep even if
+  // user deletes their account).
+  contactName     String
+  email           String
+  phone           String
+  // Business info
+  companyName     String
+  companyWebsite  String?
+  vatNumber       String?
+  businessType    String?
+  monthlyVolume   String?
+  // UK postal address. `address` is line 1 (kept under the existing name so
+  // legacy rows + the admin "address" display continue to work). The other
+  // four fields were added when we standardised on UK address capture.
+  address         String
+  addressLine2    String?
+  city            String?
+  county          String?
+  postcode        String?
+  country         String?            @default("United Kingdom")
+  notes           String?
+  // Decision
+  status          TradeRequestStatus @default(PENDING)
+  decidedAt       DateTime?
+  decidedById     String?
+  decidedBy       User?              @relation("AdminTradeDecisions", fields: [decidedById], references: [id], onDelete: SetNull)
+  decisionNote    String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([status])
+  @@index([userId])
+}
+
+model Expense {
+  id              String   @id @default(cuid())
+  title           String
+  category        String
+  amount          Decimal  @db.Decimal(10, 2)
+  paidOn          DateTime
+  vendor          String?
+  paymentMethod   String?
+  notes           String?
+  createdByAdminId String?
+  createdByAdmin  User?    @relation("AdminCreatedExpenses", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([paidOn])
+  @@index([category])
+}
+
+// Audit trail of all admin/staff/manager actions. We snapshot user name/role
+// onto the row so the entry stays readable even if the user is deleted.
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName   String
+  userEmail  String
+  userRole   String
+  action     String   // "created" | "updated" | "deleted" | "status-changed" | "approved" | …
+  moduleKey  String   // "product" | "order" | "expense" | …
+  target     String?  // human-readable summary, e.g. "Brake Pads CBR-150"
+  targetId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([moduleKey])
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  order         Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product @relation(fields: [productId], references: [id])
+  name          String
+  // Actual price billed (after any trade discount).
+  price         Decimal @db.Decimal(10, 2)
+  // Pre-discount product price snapshotted at order time. Equal to `price`
+  // when no discount was applied.
+  originalPrice Decimal @db.Decimal(10, 2) @default(0)
+  quantity      Int
+  // FIFO cost attribution. Populated when the order transitions to
+  // DELIVERED — one row per StockLayer consumed by this line. Cleared
+  // (deleted) on transition out of DELIVERED.
+  costAllocations OrderItemCostAllocation[]
+
+  // Order invoice loads OrderItems by orderId; product-delete checks scan
+  // OrderItems by productId. Without these indexes both end up as seq-scans
+  // on a table that grows monotonically with every sale.
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  country     String?
+  notes       String?
+  active      Boolean  @default(true)
+  purchaseOrders PurchaseOrder[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+}
+
+model PurchaseOrder {
+  id               String                 @id @default(cuid())
+  // Human-readable number, e.g. "PO5000001". Allocated transactionally
+  // similar to Order.orderNumber.
+  poNumber         String                 @unique
+  supplierId       String
+  supplier         Supplier               @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  status           PurchaseOrderStatus    @default(DRAFT)
+  // Money totals snapshotted at create-time; updated on amend.
+  total            Decimal                @db.Decimal(10, 2)
+  notes            String?
+  expectedAt       DateTime?
+  receivedAt       DateTime?
+  // Tracks whether stock has been incremented for the items on this PO.
+  // Set true when status transitions into RECEIVED, false on transition out.
+  stockReceived    Boolean                @default(false)
+  createdByAdminId String?
+  createdByAdmin   User?                  @relation("AdminCreatedPOs", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  items            PurchaseOrderItem[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Promotional message rendered in the storefront top bar. Admin maintains
+// a small list; the top bar is hidden entirely when no Offer.active is true.
+model Offer {
+  id        String   @id @default(cuid())
+  text      String
+  icon      String?  // optional emoji / unicode glyph to render before the text
+  active    Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, position])
+}
+
+// Courier company that handles shipments. Admin maintains the list under
+// "Tracking" in the admin panel. `trackingUrl` is the carrier's public
+// tracking page; the customer-facing /track page uses it to redirect.
+model Courier {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  trackingUrl String
+  logoUrl     String?
+  active      Boolean  @default(true)
+  orders      Order[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active])
+}
+
+model PurchaseOrderItem {
+  id        String   @id @default(cuid())
+  poId      String
+  po        PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  // Snapshot fields so the line survives even if the product is removed
+  // or renamed after the PO is recorded.
+  name      String
+  sku       String?
+  unitCost  Decimal  @db.Decimal(10, 2)
+  quantity  Int
+  // The inventory layer created when this PO line was received. Set when
+  // the PO transitions to RECEIVED; deleted on transition out (if still
+  // unconsumed).
+  stockLayer StockLayer?
+
+  @@index([productId])
+}
+
+// Inventory layer (FIFO batch). One row per distinct receipt event for a
+// product — typically created when a PO transitions to RECEIVED, but also
+// when admin manually bumps stock outside a PO. `qtyRemaining` is decremented
+// (in oldest-first order) as orders are delivered. The invariant we maintain
+// is: SUM(qtyRemaining) per product == product.stock.
+model StockLayer {
+  id              String           @id @default(cuid())
+  productId       String
+  product         Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Set when this layer was created from a PO line. Unique because each PO
+  // line creates at most one layer.
+  sourcePoItemId  String?          @unique
+  sourcePoItem    PurchaseOrderItem? @relation(fields: [sourcePoItemId], references: [id], onDelete: SetNull)
+  source          StockLayerSource
+  unitCost        Decimal          @db.Decimal(10, 2)
+  // The retail price this batch will sell at when it's the active (oldest
+  // in-stock) layer. The product's displayed Product.price always tracks
+  // the oldest active layer's unitRetail — so customers keep paying the
+  // old price while old stock remains, then switch to the new batch's
+  // price once it depletes. Nullable for legacy rows backfilled before
+  // this field existed.
+  unitRetail      Decimal?         @db.Decimal(10, 2)
+  qtyReceived     Int
+  qtyRemaining    Int
+  // Effective date for FIFO ordering. For PO layers this equals the PO's
+  // receivedAt (or now() on apply); for manual / initial layers it's the
+  // creation time. Kept as its own column so we don't rely on createdAt
+  // ordering when historical layers are backfilled out-of-order.
+  receivedAt      DateTime         @default(now())
+  notes           String?
+  allocations     OrderItemCostAllocation[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([productId, receivedAt])
+  @@index([receivedAt])
+  @@index([source])
+}
+
+// FIFO consumption record. Created when an order item is fulfilled — one
+// row per StockLayer the item drew from. Lets the dashboard compute actual
+// cost-of-goods-sold per item (instead of using the single mutable
+// Product.costPrice value). Deleted when the order moves OUT of DELIVERED.
+model OrderItemCostAllocation {
+  id             String     @id @default(cuid())
+  orderItemId    String
+  orderItem      OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  stockLayerId   String
+  stockLayer     StockLayer @relation(fields: [stockLayerId], references: [id], onDelete: Restrict)
+  qty            Int
+  unitCost       Decimal    @db.Decimal(10, 2)
+  createdAt      DateTime   @default(now())
+
+  @@index([orderItemId])
+  @@index([stockLayerId])
+}
+
+// Payment attempt recorded against an Order. One Order can have several
+// (failed card, then successful retry), but only the SUCCEEDED one marks
+// the order as paid (Order.paidAt is stamped from this row). Provider
+// identifiers are deliberately generic so we can add non-Stripe rails
+// later without a schema change.
+model Payment {
+  id              String        @id @default(cuid())
+  orderId         String
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // "stripe" today; could grow to "paypal" / "manual" etc.
+  provider        String        @default("stripe")
+  // Stripe PaymentIntent id (pi_...) — unique so the webhook can upsert
+  // safely on retries.
+  providerPaymentId String      @unique
+  status          PaymentStatus @default(PENDING)
+  // Amount in the order currency. Stored separately from Order.total so
+  // partial refunds / partial captures stay representable later.
+  amount          Decimal       @db.Decimal(10, 2)
+  currency        String        @default("gbp")
+  // Optional links: the Stripe receipt + the last error/decline message.
+  receiptUrl      String?
+  failureMessage  String?
+  // Raw provider metadata snapshot — handy for support without re-fetching
+  // from the Stripe dashboard.
+  meta            Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
