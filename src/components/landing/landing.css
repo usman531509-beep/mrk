@@ -1126,7 +1126,10 @@
     grid-column: span 2;
   }
   .mrk-category-suspension img {
-    object-position: center 58%;
+    object-position: 15% 58%;
+  }
+  .mrk-category-brakes img {
+    object-position: 20% center;
   }
   .mrk-category-copy,
   .mrk-category-engine .mrk-category-copy,
@@ -1137,11 +1140,42 @@
     font-size: 15px;
   }
   .mrk-category p {
-    font-size: 23px;
+    font-size: 19px;
+    line-height: 1.22;
+    font-weight: 500;
   }
+  /* Full-width cards: the photo runs under the left-hand copy on phones, so
+     a light wash from the left keeps the text readable. */
+  .mrk-category-suspension .mrk-category-copy,
+  .mrk-category-brakes .mrk-category-copy {
+    background: linear-gradient(
+      to right,
+      rgba(232, 243, 250, 0.95) 0%,
+      rgba(232, 243, 250, 0.85) 42%,
+      rgba(232, 243, 250, 0) 72%
+    );
+  }
+  .mrk-category-suspension .mrk-category-copy {
+    background: radial-gradient(
+      ellipse 95% 78% at 0% 0%,
+      rgba(232, 243, 250, 0.95) 0%,
+      rgba(232, 243, 250, 0.86) 48%,
+      rgba(232, 243, 250, 0) 100%
+    );
+  }
+  /* The half-width cards put the dark part photo right under the copy, so a
+     soft light wash top and bottom keeps the navy text readable. */
   .mrk-category-engine .mrk-category-copy,
   .mrk-category-lighting .mrk-category-copy {
     padding: 18px 14px;
+    background: linear-gradient(
+      to bottom,
+      rgba(232, 243, 250, 0.96) 0%,
+      rgba(232, 243, 250, 0.88) 34%,
+      rgba(232, 243, 250, 0) 58%,
+      rgba(232, 243, 250, 0) 72%,
+      rgba(232, 243, 250, 0.9) 100%
+    );
   }
   .mrk-category-engine h3,
   .mrk-category-lighting h3 {
@@ -1150,12 +1184,14 @@
   }
   .mrk-category-engine p,
   .mrk-category-lighting p {
-    font-size: 17px;
-    margin-top: 16px;
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 500;
+    margin-top: 12px;
   }
   .mrk-category-engine img,
   .mrk-category-lighting img {
-    object-position: 64% center;
+    object-position: 64% 70%;
   }
   .mrk-category-engine .mrk-text-link,
   .mrk-category-lighting .mrk-text-link {
