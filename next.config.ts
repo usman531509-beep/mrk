@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
     // *.storage.supabase.co (current public-bucket host shape). Cloudinary
     // is no longer used; left out on purpose.
     remotePatterns: [
+      { protocol: "https", hostname: "*.public.blob.vercel-storage.com" },
       { protocol: "https", hostname: "*.supabase.co" },
       { protocol: "https", hostname: "*.storage.supabase.co" },
       { protocol: "https", hostname: "images.unsplash.com" },

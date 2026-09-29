@@ -6,6 +6,7 @@ tsconfig.tsbuildinfo
 .env
 .env.local
 .env*.local
+.env.vercel
 *.log
 .DS_Store
 .vscode/

@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { put } from "@vercel/blob";
 import { auth } from "@/auth";
 import { compressUnder200KB } from "@/lib/compress-image";
 import { getSupabase, SUPABASE_BUCKET, supabaseConfigured } from "@/lib/supabase-storage";
 
+// Vercel Blob auth: a read-write token, or (newer stores) BLOB_STORE_ID plus
+// the OIDC token Vercel injects into every function at runtime.
+const useBlob = !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 const useCloudinary = !!process.env.CLOUDINARY_CLOUD_NAME;
 
 export async function POST(req: Request) {
@@ -33,7 +37,23 @@ export async function POST(req: Request) {
   const { buffer, contentType, ext } = compressed;
   const objectName = `${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
 
-  // ---- Supabase Storage (preferred when configured) ----------------------
+  // ---- Vercel Blob (preferred when configured) ---------------------------
+  if (useBlob) {
+    try {
+      const blob = await put(`mrk-spare/${objectName}`, buffer, {
+        access: "public",
+        contentType,
+        cacheControlMaxAge: 31536000,
+      });
+      return NextResponse.json({ url: blob.url, bytes: buffer.length });
+    } catch (e) {
+      const blobMsg = e instanceof Error ? e.message : String(e);
+      console.error("[upload:blob]", e);
+      return NextResponse.json({ error: `Blob upload failed: ${blobMsg}` }, { status: 500 });
+    }
+  }
+
+  // ---- Supabase Storage ----------------------------------------------------
   if (supabaseConfigured) {
     try {
       const sb = getSupabase()!;
