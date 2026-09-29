@@ -46,6 +46,9 @@ export default function LoginPage() {
 
   return (
     <AuthShell>
+      {/* TEMP: test accounts — remove before launch */}
+      <DemoLogins onPick={(e, p) => { setEmail(e); setPassword(p); setError(null); }} />
+
       <h1>Sign in</h1>
       <p className="sub">Welcome back sign in to track orders and see your prices.</p>
 
@@ -108,8 +111,6 @@ export default function LoginPage() {
         Garage or trade buyer? <Link href="/trade-account">Apply for a trade account</Link>
       </p>
 
-      {/* TEMP: test accounts — remove before launch */}
-      <DemoLogins onPick={(e, p) => { setEmail(e); setPassword(p); setError(null); }} />
     </AuthShell>
   );
 }

@@ -23,7 +23,7 @@ const DEMO_ACCOUNTS = parseDemoLogins(process.env.NEXT_PUBLIC_DEMO_LOGINS);
 export function DemoLogins({ onPick }: { onPick: (email: string, password: string) => void }) {
   if (!DEMO_ACCOUNTS.length) return null;
   return (
-    <div className="mt-6 rounded-[10px] border border-dashed border-[#b9c9d8] bg-[#f6f9fc] px-3 py-2.5">
+    <div className="mb-6 rounded-[10px] border border-dashed border-[#b9c9d8] bg-[#f6f9fc] px-3 py-2.5">
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5b6b7c]">
         Test login — click to fill
       </div>
