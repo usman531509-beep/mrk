@@ -81,8 +81,8 @@ When ready to deploy, just change `.env`:
 
 | Role     | Email                  | Password   |
 |----------|------------------------|------------|
-| **Admin**    | `admin@mrkspare.com`  | `admin123` |
-| **Customer** | `user@mrkspare.com`   | `user123`  |
+| **Admin**    | `admin@mrkspare.com`  | `SEED_ADMIN_PASSWORD` in `.env` |
+| **Customer** | `user@mrkspare.com`   | `SEED_USER_PASSWORD` in `.env` |
 
 The login page has one-click buttons to fill these in.
 
