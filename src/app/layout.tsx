@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Archivo, Archivo_Narrow } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import "./theme.css";
 import { SessionProvider } from "next-auth/react";
@@ -22,27 +22,29 @@ import { ForcePasswordChange } from "@/components/ForcePasswordChange";
 // condensed display headings, and Archivo for the landing page headlines.
 // --font-mono-ui also maps to Inter (no separate mono face; tables rely on
 // tabular-nums).
-const body = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800", "900"],
+// Self-hosted (src/fonts, latin variable woff2 from Fontsource, OFL) so the
+// build never depends on fetching from Google Fonts.
+const body = localFont({
+  src: "../fonts/inter-latin-wght-normal.woff2",
+  weight: "400 900",
   variable: "--font-body",
   display: "swap",
 });
-const head = Archivo_Narrow({
-  subsets: ["latin"],
+const head = localFont({
+  src: "../fonts/archivo-narrow-latin-wght-normal.woff2",
   weight: "700",
   variable: "--font-head",
   display: "swap",
 });
-const display = Archivo({
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800", "900"],
+const display = localFont({
+  src: "../fonts/archivo-latin-wght-normal.woff2",
+  weight: "500 900",
   variable: "--font-archivo",
   display: "swap",
 });
-const monoUi = Inter({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+const monoUi = localFont({
+  src: "../fonts/inter-latin-wght-normal.woff2",
+  weight: "500 700",
   variable: "--font-mono-ui",
   display: "swap",
 });
