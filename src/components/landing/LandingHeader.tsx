@@ -151,9 +151,11 @@ export function LandingHeader({
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            // Signed out: straight to the login page (it links to sign-up).
-            <Link href="/login" className="mrk-icon-button" aria-label="Sign in">
-              <UserRound />
+            // Signed out: a labelled button so it's obvious this is where you
+            // log in (the login page links to sign-up).
+            <Link href="/login" className="mrk-signin">
+              <UserRound aria-hidden="true" />
+              <span>Sign in</span>
             </Link>
           )}
         </div>

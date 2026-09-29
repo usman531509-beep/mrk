@@ -157,9 +157,12 @@
 .mrk-nav-trigger[data-state="open"] {
   color: #173b58;
 }
+/* The search pill takes whatever room the bar has left (up to 337px), so the
+   nav, actions and Sign in button never get pushed off the edge. */
 .mrk-search-wrap {
   position: relative;
-  flex-shrink: 0;
+  flex: 0 1 337px;
+  min-width: 180px;
 }
 .mrk-search {
   display: flex;
@@ -170,8 +173,7 @@
   background: rgba(255, 255, 255, 0.55);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
-  width: clamp(235px, 22vw, 337px);
-  flex-shrink: 0;
+  width: 100%;
   transition:
     background 0.2s ease,
     border-color 0.2s ease,
@@ -239,6 +241,38 @@
 .mrk-cart-button {
   position: relative;
 }
+.mrk-signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 42px;
+  padding: 0 18px 0 14px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--mrk-navy);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+  box-shadow: 0 8px 18px -10px rgba(7, 31, 54, 0.8);
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+.mrk-signin:hover {
+  background: #173b58;
+}
+.mrk-signin:active {
+  transform: scale(0.97);
+}
+.mrk-signin:focus-visible {
+  outline: 2px solid #4084b4;
+  outline-offset: 2px;
+}
+.mrk-signin svg {
+  width: 19px;
+  height: 19px;
+  stroke-width: 1.9;
+}
 .mrk-cart-count {
   position: absolute;
   top: 1px;
@@ -263,7 +297,7 @@
 }
 /* Track order also lives in the account menu, so it drops out of the bar
    first when horizontal space runs short. */
-@media (max-width: 1360px) and (min-width: 1051px) {
+@media (max-width: 1500px) and (min-width: 1051px) {
   .mrk-nav-track {
     display: none !important;
   }
@@ -819,8 +853,9 @@
     gap: 6px;
     margin-left: 0;
   }
-  .mrk-search {
-    width: 230px;
+  .mrk-search-wrap {
+    flex-basis: 260px;
+    min-width: 150px;
   }
   .mrk-hero-promises {
     gap: 20px;
@@ -873,9 +908,7 @@
   }
   .mrk-search-wrap {
     margin-left: auto;
-  }
-  .mrk-search {
-    width: min(34vw, 340px);
+    flex-basis: min(34vw, 340px);
   }
   .mrk-navigation {
     display: none;
@@ -995,11 +1028,21 @@
     padding-block: 14px;
   }
   .mrk-wordmark {
-    font-size: 25px;
+    font-size: min(25px, 6vw);
   }
   .mrk-header-actions {
     margin-left: auto;
-    gap: 10px;
+    gap: 4px;
+  }
+  /* Phones: text-only pill so the header still fits on one row. */
+  .mrk-signin {
+    height: 36px;
+    padding: 0 13px;
+    margin-left: 0;
+    font-size: 13px;
+  }
+  .mrk-signin svg {
+    display: none;
   }
   .mrk-menu-toggle {
     width: 40px;
@@ -1008,6 +1051,7 @@
   .mrk-search-wrap {
     order: 5;
     margin: 5px 0 0;
+    flex: 0 0 100%;
     width: 100%;
   }
   .mrk-search {
@@ -1223,7 +1267,7 @@
     padding-inline: 16px;
   }
   .mrk-wordmark {
-    font-size: 21px;
+    font-size: min(21px, 5.6vw);
   }
   .mrk-header-actions {
     gap: 3px;
@@ -2192,6 +2236,10 @@
   .mrk-header-actions {
     gap: 0;
   }
+  .mrk-signin {
+    padding: 0 11px;
+    font-size: 12.5px;
+  }
   .mrk-header .mrk-icon-button {
     width: 40px;
     height: 40px;
@@ -2201,7 +2249,7 @@
     margin-right: 0;
   }
   .mrk-wordmark {
-    font-size: 20px;
+    font-size: min(20px, 5.4vw);
   }
   .mrk-hero .mrk-eyebrow > span {
     display: none;
